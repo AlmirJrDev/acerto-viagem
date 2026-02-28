@@ -3,41 +3,85 @@ import jsPDF from 'jspdf'
 import html2canvas from 'html2canvas'
 import './App.css'
 
-const emptyViagem = { orig: '', dest: '', peso: '', ton: '', frete: '' }
-const emptyDiesel = { data: '', posto: '', litros: '', preco: '', total: '' }
+interface Viagem {
+  orig: string
+  dest: string
+  peso: string
+  ton: string
+  frete: string
+}
+
+interface Diesel {
+  data: string
+  posto: string
+  litros: string
+  preco: string
+  total: string
+}
+
+interface FormState {
+  dataSaida: string
+  kmSaida: string
+  dataChegada: string
+  kmChegada: string
+  percurso: string
+  consumo: string
+  media: string
+  viagens: Viagem[]
+  diesel: Diesel[]
+  pedagio: string
+  outrasDespesas: string
+  comissao: string
+  observacoes: string
+}
+
+const emptyViagem: Viagem = { orig: '', dest: '', peso: '', ton: '', frete: '' }
+const emptyDiesel: Diesel = { data: '', posto: '', litros: '', preco: '', total: '' }
 
 export default function App() {
-  const printRef = useRef()
-  const [form, setForm] = useState({
+  const printRef = useRef<HTMLDivElement>(null)
+  const [form, setForm] = useState<FormState>({
     dataSaida: '', kmSaida: '', dataChegada: '', kmChegada: '',
     percurso: '', consumo: '', media: '',
-    viagens: [{ ...emptyViagem }, { ...emptyViagem }, { ...emptyViagem }, { ...emptyViagem }],
+    viagens: Array(4).fill(null).map(() => ({ ...emptyViagem })),
     diesel: Array(10).fill(null).map(() => ({ ...emptyDiesel })),
     pedagio: '', outrasDespesas: '', comissao: '', observacoes: ''
   })
 
-  const set = (key, val) => setForm(f => ({ ...f, [key]: val }))
-  const setViagem = (i, key, val) => setForm(f => {
-    const v = [...f.viagens]; v[i] = { ...v[i], [key]: val }; return { ...f, viagens: v }
-  })
-  const setDiesel = (i, key, val) => setForm(f => {
-    const d = [...f.diesel]; 
-    d[i] = { ...d[i], [key]: val }
-    if (key === 'litros' || key === 'preco') {
-      const litros = parseFloat(key === 'litros' ? val : d[i].litros) || 0
-      const preco = parseFloat(key === 'preco' ? val : d[i].preco) || 0
-      d[i].total = (litros * preco).toFixed(2)
-    }
-    return { ...f, diesel: d }
-  })
+  const set = (key: keyof FormState, val: string) =>
+    setForm(f => ({ ...f, [key]: val }))
+
+  const setViagem = (i: number, key: keyof Viagem, val: string) =>
+    setForm(f => {
+      const v = [...f.viagens]
+      v[i] = { ...v[i], [key]: val }
+      return { ...f, viagens: v }
+    })
+
+  const setDiesel = (i: number, key: keyof Diesel, val: string) =>
+    setForm(f => {
+      const d = [...f.diesel]
+      d[i] = { ...d[i], [key]: val }
+      if (key === 'litros' || key === 'preco') {
+        const litros = parseFloat(key === 'litros' ? val : d[i].litros) || 0
+        const preco = parseFloat(key === 'preco' ? val : d[i].preco) || 0
+        d[i].total = (litros * preco).toFixed(2)
+      }
+      return { ...f, diesel: d }
+    })
 
   const totalFretes = form.viagens.reduce((s, v) => s + (parseFloat(v.frete) || 0), 0)
   const totalAbast = form.diesel.reduce((s, d) => s + (parseFloat(d.total) || 0), 0)
-  const saldo = totalFretes - totalAbast - (parseFloat(form.pedagio) || 0) - (parseFloat(form.outrasDespesas) || 0) - (parseFloat(form.comissao) || 0)
+  const saldo =
+    totalFretes -
+    totalAbast -
+    (parseFloat(form.pedagio) || 0) -
+    (parseFloat(form.outrasDespesas) || 0) -
+    (parseFloat(form.comissao) || 0)
 
   const gerarPDF = async () => {
-    const el = printRef.current
-    const canvas = await html2canvas(el, { scale: 2, backgroundColor: '#fff', useCORS: true })
+    if (!printRef.current) return
+    const canvas = await html2canvas(printRef.current, { scale: 2, backgroundColor: '#fff', useCORS: true })
     const img = canvas.toDataURL('image/png')
     const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
     const w = pdf.internal.pageSize.getWidth()
@@ -47,6 +91,18 @@ export default function App() {
   }
 
   const inp = "bg-transparent border-b border-gray-400 focus:border-blue-600 outline-none w-full text-sm px-1 py-0.5"
+
+  type AcertoRow =
+    | [string, string, null]
+    | [string, null, keyof FormState]
+
+  const acertoRows: AcertoRow[] = [
+    ['Total em Fretes', `R$ ${totalFretes.toFixed(2)}`, null],
+    ['Total em Abastecimento', `R$ ${totalAbast.toFixed(2)}`, null],
+    ['Pedágio', null, 'pedagio'],
+    ['Outras Despesas', null, 'outrasDespesas'],
+    ['Comissão', null, 'comissao'],
+  ]
 
   return (
     <div className="min-h-screen bg-gray-100 py-8 px-4">
@@ -63,7 +119,7 @@ export default function App() {
 
         {/* PRINTABLE AREA */}
         <div ref={printRef} className="bg-white p-8 shadow-lg rounded-lg font-sans text-sm">
-          
+
           {/* HEADER */}
           <div className="flex flex-wrap gap-6 mb-4">
             <label className="flex flex-col gap-1 flex-1 min-w-[120px]">
@@ -146,11 +202,21 @@ export default function App() {
             <tbody>
               {form.diesel.map((d, i) => (
                 <tr key={i} className={i % 2 === 0 ? 'bg-gray-50' : 'bg-white'}>
-                  <td className="border border-gray-200 p-0.5"><input type="date" className={inp} value={d.data} onChange={e => setDiesel(i, 'data', e.target.value)} /></td>
-                  <td className="border border-gray-200 p-0.5"><input className={inp} value={d.posto} onChange={e => setDiesel(i, 'posto', e.target.value)} /></td>
-                  <td className="border border-gray-200 p-0.5"><input className={inp + ' text-right'} value={d.litros} onChange={e => setDiesel(i, 'litros', e.target.value)} /></td>
-                  <td className="border border-gray-200 p-0.5"><input className={inp + ' text-right'} value={d.preco} onChange={e => setDiesel(i, 'preco', e.target.value)} /></td>
-                  <td className="border border-gray-200 p-0.5 text-right text-xs font-medium">{d.total ? `R$ ${d.total}` : ''}</td>
+                  <td className="border border-gray-200 p-0.5">
+                    <input type="date" className={inp} value={d.data} onChange={e => setDiesel(i, 'data', e.target.value)} />
+                  </td>
+                  <td className="border border-gray-200 p-0.5">
+                    <input className={inp} value={d.posto} onChange={e => setDiesel(i, 'posto', e.target.value)} />
+                  </td>
+                  <td className="border border-gray-200 p-0.5">
+                    <input className={inp + ' text-right'} value={d.litros} onChange={e => setDiesel(i, 'litros', e.target.value)} />
+                  </td>
+                  <td className="border border-gray-200 p-0.5">
+                    <input className={inp + ' text-right'} value={d.preco} onChange={e => setDiesel(i, 'preco', e.target.value)} />
+                  </td>
+                  <td className="border border-gray-200 p-0.5 text-right text-xs font-medium">
+                    {d.total ? `R$ ${d.total}` : ''}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -165,22 +231,18 @@ export default function App() {
               <h2 className="text-center font-bold text-base uppercase mb-3 border-b-2 border-gray-800 pb-1">Acerto</h2>
               <table className="w-full text-sm border-collapse">
                 <tbody>
-                  {[
-                    ['Total em Fretes', `R$ ${totalFretes.toFixed(2)}`, null],
-                    ['Total em Abastecimento', `R$ ${totalAbast.toFixed(2)}`, null],
-                    ['Pedágio', null, 'pedagio'],
-                    ['Outras Despesas', null, 'outrasDespesas'],
-                    ['Comissão', null, 'comissao'],
-                  ].map(([label, val, key]) => (
+                  {acertoRows.map(([label, val, key]) => (
                     <tr key={label} className="border-b border-gray-200">
                       <td className="py-1 font-semibold pr-2">{label}</td>
                       <td className="py-1 text-right">
-                        {val ? <span>{val}</span> : (
+                        {val !== null ? (
+                          <span>{val}</span>
+                        ) : (
                           <input
                             className="border-b border-gray-400 focus:border-blue-600 outline-none text-right w-24 text-sm"
                             placeholder="0.00"
-                            value={form[key]}
-                            onChange={e => set(key, e.target.value)}
+                            value={form[key as keyof FormState] as string}
+                            onChange={e => set(key as keyof FormState, e.target.value)}
                           />
                         )}
                       </td>
