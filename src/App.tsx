@@ -35,11 +35,43 @@ interface FormState {
   observacoes: string
 }
 
+type AcertoRow =
+  | [string, string, null]
+  | [string, null, keyof FormState]
+
 const emptyViagem: Viagem = { orig: '', dest: '', peso: '', ton: '', frete: '' }
 const emptyDiesel: Diesel = { data: '', posto: '', litros: '', preco: '', total: '' }
 
+const tdStyle: React.CSSProperties = {
+  padding: '5px 8px',
+  borderBottom: '1px solid #e5e7eb',
+  fontSize: '12px',
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">{label}</span>
+      {children}
+    </div>
+  )
+}
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{
+      textAlign: 'center', fontWeight: 900, fontSize: '13px',
+      textTransform: 'uppercase', letterSpacing: '2px',
+      borderBottom: '2.5px solid #111', paddingBottom: '6px', marginBottom: '12px'
+    }}>
+      {children}
+    </div>
+  )
+}
+
 export default function App() {
   const printRef = useRef<HTMLDivElement>(null)
+  const [loading, setLoading] = useState(false)
   const [form, setForm] = useState<FormState>({
     dataSaida: '', kmSaida: '', dataChegada: '', kmChegada: '',
     percurso: '', consumo: '', media: '',
@@ -54,7 +86,13 @@ export default function App() {
   const setViagem = (i: number, key: keyof Viagem, val: string) =>
     setForm(f => {
       const v = [...f.viagens]
-      v[i] = { ...v[i], [key]: val }
+      const updated = { ...v[i], [key]: val }
+      if (key === 'peso' || key === 'ton') {
+        const peso = parseFloat(key === 'peso' ? val : updated.peso) || 0
+        const ton = parseFloat(key === 'ton' ? val : updated.ton) || 0
+        updated.frete = (peso * ton).toFixed(2)
+      }
+      v[i] = updated
       return { ...f, viagens: v }
     })
 
@@ -79,23 +117,6 @@ export default function App() {
     (parseFloat(form.outrasDespesas) || 0) -
     (parseFloat(form.comissao) || 0)
 
-  const gerarPDF = async () => {
-    if (!printRef.current) return
-    const canvas = await html2canvas(printRef.current, { scale: 2, backgroundColor: '#fff', useCORS: true })
-    const img = canvas.toDataURL('image/png')
-    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
-    const w = pdf.internal.pageSize.getWidth()
-    const h = (canvas.height * w) / canvas.width
-    pdf.addImage(img, 'PNG', 0, 0, w, h)
-    pdf.save(`acerto-viagem-${form.dataSaida || 'sem-data'}.pdf`)
-  }
-
-  const inp = "bg-transparent border-b border-gray-400 focus:border-blue-600 outline-none w-full text-sm px-1 py-0.5"
-
-  type AcertoRow =
-    | [string, string, null]
-    | [string, null, keyof FormState]
-
   const acertoRows: AcertoRow[] = [
     ['Total em Fretes', `R$ ${totalFretes.toFixed(2)}`, null],
     ['Total em Abastecimento', `R$ ${totalAbast.toFixed(2)}`, null],
@@ -104,173 +125,348 @@ export default function App() {
     ['Comissão', null, 'comissao'],
   ]
 
+  const gerarPDF = async () => {
+    if (!printRef.current) return
+    setLoading(true)
+    try {
+      const canvas = await html2canvas(printRef.current, {
+        scale: 2,
+        backgroundColor: '#fff',
+        useCORS: true,
+        windowWidth: 900,
+      })
+      const img = canvas.toDataURL('image/png')
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+      const w = pdf.internal.pageSize.getWidth()
+      const h = (canvas.height * w) / canvas.width
+      const pageH = pdf.internal.pageSize.getHeight()
+
+      if (h <= pageH) {
+        pdf.addImage(img, 'PNG', 0, 0, w, h)
+      } else {
+        let posY = 0
+        while (posY < h) {
+          if (posY > 0) pdf.addPage()
+          pdf.addImage(img, 'PNG', 0, -posY, w, h)
+          posY += pageH
+        }
+      }
+      pdf.save(`acerto-viagem-${form.dataSaida || 'sem-data'}.pdf`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const inp = "bg-transparent border-b border-gray-300 focus:border-blue-500 outline-none w-full text-sm px-1 py-1.5 transition-colors"
+
   return (
-    <div className="min-h-screen bg-gray-100 py-8 px-4">
-      <div className="max-w-3xl mx-auto">
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="text-2xl font-bold text-gray-800">Acerto de Viagem</h1>
+    <div className="min-h-screen bg-gray-100">
+
+      {/* HEADER FIXO */}
+      <header className="sticky top-0 z-50 bg-white border-b border-gray-200 shadow-sm">
+        <div className="max-w-3xl mx-auto px-4 py-3 flex justify-between items-center">
+          <div>
+            <h1 className="text-lg font-black text-gray-900 leading-tight">Acerto de Viagem</h1>
+            <p className="text-xs text-gray-400">Preencha e gere o PDF</p>
+          </div>
           <button
             onClick={gerarPDF}
-            className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2 rounded-lg shadow transition"
+            disabled={loading}
+            className="bg-blue-600 active:bg-blue-800 disabled:bg-blue-300 text-white font-bold px-4 py-2.5 rounded-xl text-sm shadow-md transition-all flex items-center gap-2"
           >
-            📄 Gerar PDF
+            {loading ? (
+              <>
+                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                </svg>
+                Gerando...
+              </>
+            ) : '📄 Gerar PDF'}
           </button>
         </div>
+      </header>
 
-        {/* PRINTABLE AREA */}
-        <div ref={printRef} className="bg-white p-8 shadow-lg rounded-lg font-sans text-sm">
+      <div className="max-w-3xl mx-auto px-3 py-4 space-y-4">
 
-          {/* HEADER */}
-          <div className="flex flex-wrap gap-6 mb-4">
-            <label className="flex flex-col gap-1 flex-1 min-w-[120px]">
-              <span className="font-bold text-xs uppercase">Data Saída</span>
-              <input type="date" className={inp} value={form.dataSaida} onChange={e => set('dataSaida', e.target.value)} />
-            </label>
-            <label className="flex flex-col gap-1 flex-1 min-w-[100px]">
-              <span className="font-bold text-xs uppercase">KM Saída</span>
-              <input className={inp} value={form.kmSaida} onChange={e => set('kmSaida', e.target.value)} />
-            </label>
-            <label className="flex flex-col gap-1 flex-1 min-w-[120px]">
-              <span className="font-bold text-xs uppercase">Data Chegada</span>
-              <input type="date" className={inp} value={form.dataChegada} onChange={e => set('dataChegada', e.target.value)} />
-            </label>
-            <label className="flex flex-col gap-1 flex-1 min-w-[100px]">
-              <span className="font-bold text-xs uppercase">KM Chegada</span>
-              <input className={inp} value={form.kmChegada} onChange={e => set('kmChegada', e.target.value)} />
-            </label>
+        {/* DADOS DA VIAGEM */}
+        <section className="bg-white rounded-2xl shadow-sm overflow-hidden">
+          <div className="bg-gray-800 px-4 py-2.5">
+            <h2 className="text-white font-bold text-xs uppercase tracking-widest">Dados da Viagem</h2>
           </div>
-
-          <div className="flex flex-wrap gap-6 mb-6">
-            <label className="flex flex-col gap-1 flex-1">
-              <span className="font-bold text-xs uppercase">Percurso (km)</span>
-              <input className={inp} value={form.percurso} onChange={e => set('percurso', e.target.value)} />
-            </label>
-            <label className="flex flex-col gap-1 flex-1">
-              <span className="font-bold text-xs uppercase">Consumo (L)</span>
-              <input className={inp} value={form.consumo} onChange={e => set('consumo', e.target.value)} />
-            </label>
-            <label className="flex flex-col gap-1 flex-1">
-              <span className="font-bold text-xs uppercase">Média (km/L)</span>
-              <input className={inp} value={form.media} onChange={e => set('media', e.target.value)} />
-            </label>
-          </div>
-
-          {/* VIAGENS */}
-          <h2 className="text-center font-bold text-base uppercase mb-3 border-b-2 border-gray-800 pb-1">Viagens</h2>
-          <div className="space-y-3 mb-6">
-            {form.viagens.map((v, i) => (
-              <div key={i} className="grid grid-cols-5 gap-2">
-                <label className="flex flex-col gap-1">
-                  <span className="text-xs font-semibold text-gray-500">Origem</span>
-                  <input className={inp} value={v.orig} onChange={e => setViagem(i, 'orig', e.target.value)} />
-                </label>
-                <label className="flex flex-col gap-1">
-                  <span className="text-xs font-semibold text-gray-500">Destino</span>
-                  <input className={inp} value={v.dest} onChange={e => setViagem(i, 'dest', e.target.value)} />
-                </label>
-                <label className="flex flex-col gap-1">
-                  <span className="text-xs font-semibold text-gray-500">Peso (t)</span>
-                  <input className={inp} value={v.peso} onChange={e => setViagem(i, 'peso', e.target.value)} />
-                </label>
-                <label className="flex flex-col gap-1">
-                  <span className="text-xs font-semibold text-gray-500">R$/Ton</span>
-                  <input className={inp} value={v.ton} onChange={e => setViagem(i, 'ton', e.target.value)} />
-                </label>
-                <label className="flex flex-col gap-1">
-                  <span className="text-xs font-semibold text-gray-500">T. Frete</span>
-                  <input className={inp} value={v.frete} onChange={e => setViagem(i, 'frete', e.target.value)} />
-                </label>
-              </div>
-            ))}
-            <div className="text-right font-bold text-sm pt-1">
-              TOTAL EM FRETES: R$ {totalFretes.toFixed(2)}
+          <div className="p-4 space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Data Saída">
+                <input type="date" className={inp} value={form.dataSaida} onChange={e => set('dataSaida', e.target.value)} />
+              </Field>
+              <Field label="KM Saída">
+                <input type="number" inputMode="numeric" className={inp} value={form.kmSaida} onChange={e => set('kmSaida', e.target.value)} placeholder="0" />
+              </Field>
+              <Field label="Data Chegada">
+                <input type="date" className={inp} value={form.dataChegada} onChange={e => set('dataChegada', e.target.value)} />
+              </Field>
+              <Field label="KM Chegada">
+                <input type="number" inputMode="numeric" className={inp} value={form.kmChegada} onChange={e => set('kmChegada', e.target.value)} placeholder="0" />
+              </Field>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <Field label="Percurso km">
+                <input type="number" inputMode="decimal" className={inp} value={form.percurso} onChange={e => set('percurso', e.target.value)} placeholder="0" />
+              </Field>
+              <Field label="Consumo L">
+                <input type="number" inputMode="decimal" className={inp} value={form.consumo} onChange={e => set('consumo', e.target.value)} placeholder="0" />
+              </Field>
+              <Field label="Média km/L">
+                <input type="number" inputMode="decimal" className={inp} value={form.media} onChange={e => set('media', e.target.value)} placeholder="0" />
+              </Field>
             </div>
           </div>
+        </section>
 
-          {/* DIESEL */}
-          <h2 className="text-center font-bold text-base uppercase mb-3 border-b-2 border-gray-800 pb-1">Despesas com Óleo Diesel</h2>
-          <table className="w-full border-collapse mb-2">
+        {/* VIAGENS */}
+        <section className="bg-white rounded-2xl shadow-sm overflow-hidden">
+          <div className="bg-gray-800 px-4 py-2.5">
+            <h2 className="text-white font-bold text-xs uppercase tracking-widest">Viagens</h2>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {form.viagens.map((v, i) => (
+              <div key={i} className="p-4 space-y-3">
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Viagem {i + 1}</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Origem">
+                    <input className={inp} value={v.orig} onChange={e => setViagem(i, 'orig', e.target.value)} placeholder="Cidade" />
+                  </Field>
+                  <Field label="Destino">
+                    <input className={inp} value={v.dest} onChange={e => setViagem(i, 'dest', e.target.value)} placeholder="Cidade" />
+                  </Field>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <Field label="Peso t">
+                    <input type="number" inputMode="decimal" className={inp} value={v.peso} onChange={e => setViagem(i, 'peso', e.target.value)} placeholder="0" />
+                  </Field>
+                  <Field label="R$ / Ton">
+                    <input type="number" inputMode="decimal" className={inp} value={v.ton} onChange={e => setViagem(i, 'ton', e.target.value)} placeholder="0" />
+                  </Field>
+                  <Field label="T. Frete">
+                    <input type="number" inputMode="decimal" className={inp + ' font-semibold text-blue-700'} value={v.frete} onChange={e => setViagem(i, 'frete', e.target.value)} placeholder="0" />
+                  </Field>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="bg-gray-50 px-4 py-3 flex justify-between items-center border-t border-gray-200">
+            <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">Total em Fretes</span>
+            <span className="text-base font-black text-gray-900">R$ {totalFretes.toFixed(2)}</span>
+          </div>
+        </section>
+
+        {/* DIESEL */}
+        <section className="bg-white rounded-2xl shadow-sm overflow-hidden">
+          <div className="bg-gray-800 px-4 py-2.5">
+            <h2 className="text-white font-bold text-xs uppercase tracking-widest">Despesas com Óleo Diesel</h2>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {form.diesel.map((d, i) => (
+              <div key={i} className={`p-4 space-y-3 ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Abastecimento {i + 1}</p>
+                  {d.total ? (
+                    <span className="text-xs font-bold text-green-700 bg-green-50 px-2 py-0.5 rounded-full">
+                      R$ {d.total}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Data">
+                    <input type="date" className={inp} value={d.data} onChange={e => setDiesel(i, 'data', e.target.value)} />
+                  </Field>
+                  <Field label="Posto">
+                    <input className={inp} value={d.posto} onChange={e => setDiesel(i, 'posto', e.target.value)} placeholder="Nome do posto" />
+                  </Field>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Litros">
+                    <input type="number" inputMode="decimal" className={inp} value={d.litros} onChange={e => setDiesel(i, 'litros', e.target.value)} placeholder="0" />
+                  </Field>
+                  <Field label="R$ / Litro">
+                    <input type="number" inputMode="decimal" className={inp} value={d.preco} onChange={e => setDiesel(i, 'preco', e.target.value)} placeholder="0,00" />
+                  </Field>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="bg-gray-50 px-4 py-3 flex justify-between items-center border-t border-gray-200">
+            <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">Total Abastecimentos</span>
+            <span className="text-base font-black text-gray-900">R$ {totalAbast.toFixed(2)}</span>
+          </div>
+        </section>
+
+        {/* ACERTO */}
+        <section className="bg-white rounded-2xl shadow-sm overflow-hidden">
+          <div className="bg-gray-800 px-4 py-2.5">
+            <h2 className="text-white font-bold text-xs uppercase tracking-widest">Acerto</h2>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {acertoRows.map(([label, val, key]) => (
+              <div key={label} className="flex items-center justify-between px-4 py-3">
+                <span className="text-sm font-semibold text-gray-700">{label}</span>
+                {val !== null ? (
+                  <span className="text-sm font-bold text-gray-900">{val}</span>
+                ) : (
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    className="border-b border-gray-300 focus:border-blue-500 outline-none text-right w-32 text-sm py-1 bg-transparent"
+                    placeholder="0,00"
+                    value={form[key as keyof FormState] as string}
+                    onChange={e => set(key as keyof FormState, e.target.value)}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+          <div className={`px-4 py-4 flex justify-between items-center transition-colors ${saldo >= 0 ? 'bg-green-600' : 'bg-red-600'}`}>
+            <span className="text-white font-bold text-sm uppercase tracking-wide">Saldo da Viagem</span>
+            <span className="text-white font-black text-xl">R$ {saldo.toFixed(2)}</span>
+          </div>
+        </section>
+
+        {/* OBSERVAÇÕES */}
+        <section className="bg-white rounded-2xl shadow-sm overflow-hidden">
+          <div className="bg-gray-800 px-4 py-2.5">
+            <h2 className="text-white font-bold text-xs uppercase tracking-widest">Observações</h2>
+          </div>
+          <div className="p-4">
+            <textarea
+              className="w-full h-28 border border-gray-200 rounded-xl p-3 text-sm focus:outline-none focus:border-blue-400 resize-none bg-gray-50"
+              placeholder="Anotações, pendências, informações extras..."
+              value={form.observacoes}
+              onChange={e => set('observacoes', e.target.value)}
+            />
+          </div>
+        </section>
+
+        {/* BOTÃO FINAL */}
+        <button
+          onClick={gerarPDF}
+          disabled={loading}
+          className="w-full bg-blue-600 active:bg-blue-800 disabled:bg-blue-300 text-white font-black py-4 rounded-2xl text-base shadow-lg transition-all flex items-center justify-center gap-2"
+        >
+          {loading ? 'Gerando PDF...' : '📄 Gerar PDF'}
+        </button>
+
+        <div className="h-6" />
+      </div>
+
+      {/* ÁREA OCULTA PARA CAPTURA DO PDF — layout desktop fixo em 900px */}
+      <div style={{ position: 'absolute', left: '-9999px', top: 0, width: '900px' }}>
+        <div ref={printRef} style={{ background: 'white', padding: '32px', fontFamily: 'Arial, sans-serif', fontSize: '13px' }}>
+
+          {/* Cabeçalho PDF */}
+          <div style={{ display: 'flex', gap: '16px', marginBottom: '16px', flexWrap: 'wrap' }}>
+            {([
+              ['Data Saída', form.dataSaida],
+              ['KM Saída', form.kmSaida],
+              ['Data Chegada', form.dataChegada],
+              ['KM Chegada', form.kmChegada],
+              ['Percurso (km)', form.percurso],
+              ['Consumo (L)', form.consumo],
+              ['Média (km/L)', form.media],
+            ] as [string, string][]).map(([label, val]) => (
+              <div key={label} style={{ flex: 1, minWidth: '90px' }}>
+                <div style={{ fontSize: '9px', fontWeight: 800, textTransform: 'uppercase', color: '#666', marginBottom: '2px' }}>{label}</div>
+                <div style={{ borderBottom: '1.5px solid #999', paddingBottom: '2px', minHeight: '18px', fontSize: '12px' }}>{val}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Viagens PDF */}
+          <SectionTitle>Viagens</SectionTitle>
+          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '8px' }}>
             <thead>
-              <tr className="bg-gray-800 text-white text-xs">
-                <th className="border border-gray-600 p-1 text-left">DATA</th>
-                <th className="border border-gray-600 p-1 text-left">POSTO</th>
-                <th className="border border-gray-600 p-1 text-right">LITROS</th>
-                <th className="border border-gray-600 p-1 text-right">R$/LITRO</th>
-                <th className="border border-gray-600 p-1 text-right">TOTAL R$</th>
+              <tr style={{ background: '#1f2937', color: 'white', fontSize: '11px' }}>
+                {['Origem', 'Destino', 'Peso (t)', 'R$/Ton', 'T. Frete'].map(h => (
+                  <th key={h} style={{ padding: '6px 8px', textAlign: 'left', fontWeight: 700 }}>{h}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {form.diesel.map((d, i) => (
-                <tr key={i} className={i % 2 === 0 ? 'bg-gray-50' : 'bg-white'}>
-                  <td className="border border-gray-200 p-0.5">
-                    <input type="date" className={inp} value={d.data} onChange={e => setDiesel(i, 'data', e.target.value)} />
-                  </td>
-                  <td className="border border-gray-200 p-0.5">
-                    <input className={inp} value={d.posto} onChange={e => setDiesel(i, 'posto', e.target.value)} />
-                  </td>
-                  <td className="border border-gray-200 p-0.5">
-                    <input className={inp + ' text-right'} value={d.litros} onChange={e => setDiesel(i, 'litros', e.target.value)} />
-                  </td>
-                  <td className="border border-gray-200 p-0.5">
-                    <input className={inp + ' text-right'} value={d.preco} onChange={e => setDiesel(i, 'preco', e.target.value)} />
-                  </td>
-                  <td className="border border-gray-200 p-0.5 text-right text-xs font-medium">
-                    {d.total ? `R$ ${d.total}` : ''}
-                  </td>
+              {form.viagens.map((v, i) => (
+                <tr key={i} style={{ background: i % 2 === 0 ? '#f9fafb' : 'white' }}>
+                  <td style={tdStyle}>{v.orig}</td>
+                  <td style={tdStyle}>{v.dest}</td>
+                  <td style={tdStyle}>{v.peso}</td>
+                  <td style={tdStyle}>{v.ton}</td>
+                  <td style={tdStyle}>{v.frete ? `R$ ${parseFloat(v.frete).toFixed(2)}` : ''}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <div className="text-right font-bold text-sm mb-6">
+          <div style={{ textAlign: 'right', fontWeight: 800, marginBottom: '20px', fontSize: '13px' }}>
+            TOTAL EM FRETES: R$ {totalFretes.toFixed(2)}
+          </div>
+
+          {/* Diesel PDF */}
+          <SectionTitle>Despesas com Óleo Diesel</SectionTitle>
+          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '8px' }}>
+            <thead>
+              <tr style={{ background: '#1f2937', color: 'white', fontSize: '11px' }}>
+                {['Data', 'Posto', 'Litros', 'R$/Litro', 'Total R$'].map((h, idx) => (
+                  <th key={h} style={{ padding: '6px 8px', textAlign: idx >= 2 ? 'right' : 'left', fontWeight: 700 }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {form.diesel.map((d, i) => (
+                <tr key={i} style={{ background: i % 2 === 0 ? '#f9fafb' : 'white' }}>
+                  <td style={tdStyle}>{d.data}</td>
+                  <td style={tdStyle}>{d.posto}</td>
+                  <td style={{ ...tdStyle, textAlign: 'right' }}>{d.litros}</td>
+                  <td style={{ ...tdStyle, textAlign: 'right' }}>{d.preco}</td>
+                  <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700 }}>{d.total ? `R$ ${d.total}` : ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ textAlign: 'right', fontWeight: 800, marginBottom: '20px', fontSize: '13px' }}>
             TOTAL EM ABASTECIMENTOS: R$ {totalAbast.toFixed(2)}
           </div>
 
-          {/* ACERTO + OBSERVAÇÕES */}
-          <div className="grid grid-cols-2 gap-8">
+          {/* Acerto + Obs PDF */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '32px' }}>
             <div>
-              <h2 className="text-center font-bold text-base uppercase mb-3 border-b-2 border-gray-800 pb-1">Acerto</h2>
-              <table className="w-full text-sm border-collapse">
+              <SectionTitle>Acerto</SectionTitle>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <tbody>
                   {acertoRows.map(([label, val, key]) => (
-                    <tr key={label} className="border-b border-gray-200">
-                      <td className="py-1 font-semibold pr-2">{label}</td>
-                      <td className="py-1 text-right">
-                        {val !== null ? (
-                          <span>{val}</span>
-                        ) : (
-                          <input
-                            className="border-b border-gray-400 focus:border-blue-600 outline-none text-right w-24 text-sm"
-                            placeholder="0.00"
-                            value={form[key as keyof FormState] as string}
-                            onChange={e => set(key as keyof FormState, e.target.value)}
-                          />
-                        )}
+                    <tr key={label} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                      <td style={{ padding: '6px 4px', fontWeight: 700, fontSize: '12px' }}>{label}</td>
+                      <td style={{ padding: '6px 4px', textAlign: 'right', fontSize: '12px' }}>
+                        {val !== null ? val : `R$ ${(form[key as keyof FormState] as string) || '0,00'}`}
                       </td>
                     </tr>
                   ))}
-                  <tr className="bg-gray-800 text-white font-bold">
-                    <td className="py-1.5 px-1 rounded-bl">Saldo da Viagem</td>
-                    <td className="py-1.5 px-1 text-right rounded-br">R$ {saldo.toFixed(2)}</td>
+                  <tr style={{ background: saldo >= 0 ? '#16a34a' : '#dc2626', color: 'white', fontWeight: 900 }}>
+                    <td style={{ padding: '8px 6px' }}>Saldo da Viagem</td>
+                    <td style={{ padding: '8px 6px', textAlign: 'right' }}>R$ {saldo.toFixed(2)}</td>
                   </tr>
                 </tbody>
               </table>
             </div>
-
             <div>
-              <h2 className="text-center font-bold text-base uppercase mb-3 border-b-2 border-gray-800 pb-1">Observações</h2>
-              <textarea
-                className="w-full h-32 border border-gray-300 rounded p-2 text-sm focus:outline-none focus:border-blue-500 resize-none"
-                placeholder="Anotações da viagem..."
-                value={form.observacoes}
-                onChange={e => set('observacoes', e.target.value)}
-              />
+              <SectionTitle>Observações</SectionTitle>
+              <div style={{
+                border: '1px solid #d1d5db', borderRadius: '6px', padding: '10px',
+                minHeight: '100px', fontSize: '12px', whiteSpace: 'pre-wrap'
+              }}>
+                {form.observacoes}
+              </div>
             </div>
           </div>
 
         </div>
-
-        <p className="text-center text-xs text-gray-400 mt-4">Clique em "Gerar PDF" para salvar o documento</p>
       </div>
+
     </div>
   )
 }
